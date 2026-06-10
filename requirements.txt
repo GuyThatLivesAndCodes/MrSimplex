@@ -1,8 +1,10 @@
 # MrSimplex dependencies
 #
-# The [voice] extra installs whatever voice backend your discord.py version
-# needs (PyNaCl on older releases, the "davey" library on 2.6+). Installing
-# plain discord.py is NOT enough for streaming audio.
-discord.py[voice]>=2.3.0
+# discord.py 2.6+ (which is what you get on Python 3.13/3.14) moved voice onto
+# a separate "davey" backend. Plain discord.py — even with the [voice] extra —
+# will raise "davey library needed in order to use voice" without the davey
+# package, so it is listed explicitly below.
+discord.py[voice]>=2.4.0
+davey>=0.1.5           # voice backend required by discord.py 2.6+
 python-dotenv>=1.0.0   # loads secrets from .env
 aiohttp>=3.9.0         # async HTTP for the Simplex API (also a discord.py dep)

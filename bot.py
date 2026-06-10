@@ -351,25 +351,58 @@ def register_commands(bot: MrSimplex) -> None:
                 break
         return choices
 
+    async def respond(
+        interaction: discord.Interaction,
+        content: Optional[str] = None,
+        *,
+        embed: Optional[discord.Embed] = None,
+        view: Optional[discord.ui.View] = None,
+        ephemeral: bool = False,
+    ):
+        """Reply safely whether or not the interaction was already deferred.
+
+        Avoids '40060 Interaction has already been acknowledged' by routing to
+        followup once the initial response has been sent/deferred.
+        """
+        kwargs = {"ephemeral": ephemeral}
+        if content is not None:
+            kwargs["content"] = content
+        if embed is not None:
+            kwargs["embed"] = embed
+        if view is not None:
+            kwargs["view"] = view
+        if interaction.response.is_done():
+            return await interaction.followup.send(**kwargs)
+        return await interaction.response.send_message(**kwargs)
+
     async def ensure_voice(interaction: discord.Interaction) -> Optional[MusicPlayer]:
         """Connect to the caller's voice channel; return the guild player."""
         if not interaction.guild:
-            await interaction.response.send_message(
-                "This only works inside a server.", ephemeral=True)
+            await respond(interaction, "This only works inside a server.",
+                          ephemeral=True)
             return None
         user = interaction.user
         if not isinstance(user, discord.Member) or not user.voice or not user.voice.channel:
-            await interaction.response.send_message(
-                "Join a voice channel first, then try again.", ephemeral=True)
+            await respond(interaction, "Join a voice channel first, then try again.",
+                          ephemeral=True)
             return None
 
         player = bot.get_player(interaction.guild)
         channel = user.voice.channel
-        if player.voice and player.voice.is_connected():
-            if player.voice.channel.id != channel.id:
-                await player.voice.move_to(channel)
-        else:
-            player.voice = await channel.connect()
+        try:
+            if player.voice and player.voice.is_connected():
+                if player.voice.channel.id != channel.id:
+                    await player.voice.move_to(channel)
+            else:
+                player.voice = await channel.connect()
+        except Exception as e:
+            await respond(
+                interaction,
+                f"Couldn't join the voice channel: `{e}`\n"
+                "If this mentions *davey*, run `pip install davey` and restart.",
+                ephemeral=True,
+            )
+            return None
         return player
 
     async def start_playback(
@@ -404,8 +437,8 @@ def register_commands(bot: MrSimplex) -> None:
             added += 1
 
         if added == 0:
-            await interaction.response.send_message(
-                "Nothing to play — the queue may be full.", ephemeral=True)
+            await respond(interaction,
+                          "Nothing to play — the queue may be full.", ephemeral=True)
             return
 
         if added == 1:
@@ -419,7 +452,7 @@ def register_commands(bot: MrSimplex) -> None:
             shuffled = " 🔀 shuffled" if shuffle else ""
             lead = "▶️ Playing" if was_idle else "➕ Queued"
             msg = f"{lead} **{added}** tracks{label}{shuffled}."
-        await interaction.response.send_message(msg)
+        await respond(interaction, msg)
 
     # ---- /folders ------------------------------------------------------- #
     @bot.tree.command(description="List the folders you can browse and play from.")
@@ -470,10 +503,10 @@ def register_commands(bot: MrSimplex) -> None:
     @app_commands.describe(folder="Folder to play from", track="Track to play")
     @app_commands.autocomplete(folder=folder_autocomplete, track=track_autocomplete)
     async def play(interaction: discord.Interaction, folder: str, track: str):
+        await interaction.response.defer()
         target = bot.folder_by_name(folder)
         if not target:
-            await interaction.response.send_message(
-                "That folder isn't available.", ephemeral=True)
+            await respond(interaction, "That folder isn't available.", ephemeral=True)
             return
 
         # Resolve the track. `track` is a file id from autocomplete, but a user
@@ -481,8 +514,8 @@ def register_commands(bot: MrSimplex) -> None:
         try:
             audio = await bot.audio_in_folder(target.id)
         except Exception as e:
-            await interaction.response.send_message(
-                f"Couldn't read that folder: `{e}`", ephemeral=True)
+            await respond(interaction,
+                          f"Couldn't read that folder: `{e}`", ephemeral=True)
             return
 
         chosen = next((f for f in audio if f.id == track), None)
@@ -490,8 +523,8 @@ def register_commands(bot: MrSimplex) -> None:
             chosen = next(
                 (f for f in audio if track.lower() in f.name.lower()), None)
         if chosen is None:
-            await interaction.response.send_message(
-                "Couldn't find that track in the folder.", ephemeral=True)
+            await respond(interaction,
+                          "Couldn't find that track in the folder.", ephemeral=True)
             return
 
         await start_playback(interaction, [chosen])
@@ -505,20 +538,20 @@ def register_commands(bot: MrSimplex) -> None:
     async def playfolder(
         interaction: discord.Interaction, folder: str, shuffle: bool = False
     ):
+        await interaction.response.defer()
         target = bot.folder_by_name(folder)
         if not target:
-            await interaction.response.send_message(
-                "That folder isn't available.", ephemeral=True)
+            await respond(interaction, "That folder isn't available.", ephemeral=True)
             return
         try:
             audio = await bot.audio_in_folder(target.id)
         except Exception as e:
-            await interaction.response.send_message(
-                f"Couldn't read that folder: `{e}`", ephemeral=True)
+            await respond(interaction,
+                          f"Couldn't read that folder: `{e}`", ephemeral=True)
             return
         if not audio:
-            await interaction.response.send_message(
-                f"**{target.name}** has no audio tracks.", ephemeral=True)
+            await respond(interaction,
+                          f"**{target.name}** has no audio tracks.", ephemeral=True)
             return
         await start_playback(
             interaction, audio, shuffle=shuffle, source_label=target.name)
@@ -543,6 +576,7 @@ def register_commands(bot: MrSimplex) -> None:
             )
 
         async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer()
             fld, f = self.hits[self.values[0]]
             await start_playback(interaction, [f], source_label=fld.name)
 

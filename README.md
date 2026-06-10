@@ -174,9 +174,11 @@ A few things you might want to tweak:
   (`python bot.py --check`) and that the file is real audio.
 - **`PyNaCl` / voice errors** — `pip install -r requirements.txt` again;
   the `discord.py[voice]` extra is required for voice.
-- **`RuntimeError: davey library needed in order to use voice`** — you have
-  discord.py 2.6+, which needs the new voice backend. Reinstall with the
-  voice extra: `pip install -U "discord.py[voice]"` (or just rerun
-  `pip install -r requirements.txt`), then restart the bot.
+- **`RuntimeError: davey library needed in order to use voice`** — discord.py
+  2.6+ (what you get on Python 3.13/3.14) needs the separate `davey` voice
+  backend. Install it into your venv and restart:
+  `pip install -U davey` (or rerun `pip install -r requirements.txt`).
+  If `davey` has no prebuilt wheel for your Python and fails to install, the
+  easy workaround is to use **Python 3.12** for the bot's virtualenv.
 - **Folder is empty in `/browse`** — make sure the folder ID is correct and
   actually contains audio files (`python bot.py --list-folders`).

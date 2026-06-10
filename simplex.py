@@ -15,6 +15,7 @@ rely on is that a "file" has an id and a name.
 
 from __future__ import annotations
 
+import asyncio
 import aiohttp
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -138,12 +139,41 @@ class SimplexClient:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    # HTTP statuses worth retrying — transient gateway/server hiccups.
+    _RETRY_STATUSES = {502, 503, 504, 429}
+
+    async def _get_json(
+        self, path: str, params: dict[str, Any] | None = None, retries: int = 3
+    ) -> Any:
         session = await self._ensure_session()
         url = f"{self.base_url}{path}"
-        async with session.get(url, params=params) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+        delay = 1.0
+        last_exc: Optional[Exception] = None
+        for attempt in range(retries + 1):
+            try:
+                async with session.get(
+                    url, params=params,
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as resp:
+                    if resp.status in self._RETRY_STATUSES and attempt < retries:
+                        last_exc = aiohttp.ClientResponseError(
+                            resp.request_info, resp.history,
+                            status=resp.status, message=resp.reason or "",
+                        )
+                        await asyncio.sleep(delay)
+                        delay *= 2
+                        continue
+                    resp.raise_for_status()
+                    return await resp.json()
+            except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
+                last_exc = e
+                if attempt < retries:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
 
     async def me(self) -> dict[str, Any]:
         """Return the authenticated account info (used to verify the API key)."""
