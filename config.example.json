@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy this file to config.json and edit it. Find folder IDs by running: python bot.py --list-folders",
+
+  "allowed_folders": [
+    { "name": "Lofi Beats", "id": "PUT-A-FOLDER-ID-HERE" },
+    { "name": "Sound Effects", "id": "PUT-ANOTHER-FOLDER-ID-HERE" }
+  ],
+
+  "_guild_id_comment": "Optional. Set to your Discord server ID for INSTANT slash-command updates while testing. Leave null for global commands (can take ~1 hour to show up).",
+  "guild_id": null,
+
+  "auto_disconnect_seconds": 120,
+  "max_queue": 100
+}
