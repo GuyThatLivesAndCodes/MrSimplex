@@ -16,6 +16,8 @@ with slash commands. Nothing else in your storage is exposed.
 | `/folders`         | List the folders you've made available                      |
 | `/browse <folder>` | View the audio tracks inside a folder                       |
 | `/play <folder> <track>` | Join your voice channel and stream a track (queues if busy) |
+| `/playfolder <folder> [shuffle]` | Queue a whole folder; pass `shuffle: true` to randomize |
+| `/search`          | Open a search box to find allowed folders/tracks, then play one |
 | `/queue`           | Show what's playing and what's next                         |
 | `/nowplaying`      | Show the current track                                      |
 | `/skip`            | Skip the current track                                      |

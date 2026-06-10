@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import json
 import os
+import random
 import sys
 import time
 from dataclasses import dataclass, field
@@ -371,6 +372,55 @@ def register_commands(bot: MrSimplex) -> None:
             player.voice = await channel.connect()
         return player
 
+    async def start_playback(
+        interaction: discord.Interaction,
+        files: list[SimplexFile],
+        shuffle: bool = False,
+        source_label: Optional[str] = None,
+    ) -> None:
+        """Join voice, enqueue one or more tracks, and reply with a summary.
+
+        Shared by /play, /playfolder, and the /search picker. Responds to the
+        interaction itself, so callers shouldn't also respond.
+        """
+        player = await ensure_voice(interaction)
+        if player is None:
+            return  # ensure_voice already sent an error response
+
+        items = list(files)
+        if shuffle:
+            random.shuffle(items)
+
+        was_idle = player.current is None and player.queue.qsize() == 0
+        added = 0
+        for f in items:
+            if player.queue.qsize() >= bot.config.max_queue:
+                break
+            player.enqueue(Track(
+                file_id=f.id,
+                title=f.name,
+                requested_by=interaction.user.display_name,
+            ))
+            added += 1
+
+        if added == 0:
+            await interaction.response.send_message(
+                "Nothing to play — the queue may be full.", ephemeral=True)
+            return
+
+        if added == 1:
+            only = items[0]
+            if was_idle:
+                msg = f"▶️ Now playing **{only.name}**"
+            else:
+                msg = f"➕ Queued **{only.name}** (position {player.queue.qsize()})"
+        else:
+            label = f" from **{source_label}**" if source_label else ""
+            shuffled = " 🔀 shuffled" if shuffle else ""
+            lead = "▶️ Playing" if was_idle else "➕ Queued"
+            msg = f"{lead} **{added}** tracks{label}{shuffled}."
+        await interaction.response.send_message(msg)
+
     # ---- /folders ------------------------------------------------------- #
     @bot.tree.command(description="List the folders you can browse and play from.")
     async def folders(interaction: discord.Interaction):
@@ -444,27 +494,121 @@ def register_commands(bot: MrSimplex) -> None:
                 "Couldn't find that track in the folder.", ephemeral=True)
             return
 
-        player = await ensure_voice(interaction)
-        if player is None:
-            return
+        await start_playback(interaction, [chosen])
 
-        if player.queue.qsize() >= bot.config.max_queue:
+    # ---- /playfolder ---------------------------------------------------- #
+    @bot.tree.command(
+        description="Play a whole folder — pass shuffle:true to randomize the order.")
+    @app_commands.describe(
+        folder="Folder to play", shuffle="Shuffle the tracks before playing")
+    @app_commands.autocomplete(folder=folder_autocomplete)
+    async def playfolder(
+        interaction: discord.Interaction, folder: str, shuffle: bool = False
+    ):
+        target = bot.folder_by_name(folder)
+        if not target:
             await interaction.response.send_message(
-                "The queue is full.", ephemeral=True)
+                "That folder isn't available.", ephemeral=True)
             return
+        try:
+            audio = await bot.audio_in_folder(target.id)
+        except Exception as e:
+            await interaction.response.send_message(
+                f"Couldn't read that folder: `{e}`", ephemeral=True)
+            return
+        if not audio:
+            await interaction.response.send_message(
+                f"**{target.name}** has no audio tracks.", ephemeral=True)
+            return
+        await start_playback(
+            interaction, audio, shuffle=shuffle, source_label=target.name)
 
-        item = Track(
-            file_id=chosen.id,
-            title=chosen.name,
-            requested_by=interaction.user.display_name,
+    # ---- /search (modal) ----------------------------------------------- #
+    class TrackPlaySelect(discord.ui.Select):
+        """Dropdown of matching tracks; picking one plays it."""
+
+        def __init__(self, hits: list[tuple[AllowedFolder, SimplexFile]]):
+            self.hits = {f.id: (fld, f) for fld, f in hits}
+            options = [
+                discord.SelectOption(
+                    label=f.name[:100],
+                    description=f"in {fld.name}"[:100],
+                    value=f.id,
+                )
+                for fld, f in hits[:25]
+            ]
+            super().__init__(
+                placeholder="Pick a track to play…",
+                min_values=1, max_values=1, options=options,
+            )
+
+        async def callback(self, interaction: discord.Interaction):
+            fld, f = self.hits[self.values[0]]
+            await start_playback(interaction, [f], source_label=fld.name)
+
+    class SearchResultView(discord.ui.View):
+        def __init__(self, hits: list[tuple[AllowedFolder, SimplexFile]]):
+            super().__init__(timeout=120)
+            if hits:
+                self.add_item(TrackPlaySelect(hits))
+
+    class SearchModal(discord.ui.Modal, title="Search MrSimplex"):
+        query = discord.ui.TextInput(
+            label="Find a folder or track",
+            placeholder="e.g. lofi, rain, intro…",
+            required=True, max_length=100,
         )
-        player.enqueue(item)
-        position = player.queue.qsize()
-        if player.current is None and position <= 1:
-            msg = f"▶️ Now playing **{chosen.name}**"
-        else:
-            msg = f"➕ Queued **{chosen.name}** (position {position})"
-        await interaction.response.send_message(msg)
+
+        async def on_submit(self, interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+            q = str(self.query.value).strip().lower()
+
+            # Match allowed folder names...
+            folder_matches = [
+                fld for fld in bot.config.allowed_folders
+                if q in fld.name.lower()
+            ]
+            # ...and audio tracks inside the allowed folders.
+            track_hits: list[tuple[AllowedFolder, SimplexFile]] = []
+            for fld in bot.config.allowed_folders:
+                try:
+                    audio = await bot.audio_in_folder(fld.id)
+                except Exception:
+                    continue
+                for f in audio:
+                    if q in f.name.lower():
+                        track_hits.append((fld, f))
+
+            if not folder_matches and not track_hits:
+                await interaction.followup.send(
+                    f"No allowed folders or tracks match **{q}**.", ephemeral=True)
+                return
+
+            lines: list[str] = []
+            if folder_matches:
+                lines.append("**Folders** (play with `/playfolder`):")
+                lines += [f"• {fld.name}" for fld in folder_matches]
+            if track_hits:
+                lines.append(f"\n**Tracks** ({len(track_hits)} found):")
+                lines += [
+                    f"• {f.name}  —  *{fld.name}*"
+                    for fld, f in track_hits[:25]
+                ]
+                if len(track_hits) > 25:
+                    lines.append(f"…and {len(track_hits) - 25} more "
+                                 "(narrow your search to see them).")
+
+            embed = discord.Embed(
+                title=f"Search results for “{q}”",
+                description="\n".join(lines)[:4000],
+                color=discord.Color.blurple(),
+            )
+            view = SearchResultView(track_hits)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    @bot.tree.command(description="Search the allowed folders and tracks (opens a box).")
+    async def search(interaction: discord.Interaction):
+        await interaction.response.send_modal(SearchModal())
 
     # ---- /queue --------------------------------------------------------- #
     @bot.tree.command(description="Show what's playing and what's up next.")
