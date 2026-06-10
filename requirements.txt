@@ -1,5 +1,8 @@
 # MrSimplex dependencies
-discord.py>=2.3.0
-PyNaCl>=1.5.0          # required for Discord voice
-python-dotenv>=1.0.0  # loads secrets from .env
-aiohttp>=3.9.0        # async HTTP for the Simplex API (also a discord.py dep)
+#
+# The [voice] extra installs whatever voice backend your discord.py version
+# needs (PyNaCl on older releases, the "davey" library on 2.6+). Installing
+# plain discord.py is NOT enough for streaming audio.
+discord.py[voice]>=2.3.0
+python-dotenv>=1.0.0   # loads secrets from .env
+aiohttp>=3.9.0         # async HTTP for the Simplex API (also a discord.py dep)

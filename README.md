@@ -173,6 +173,10 @@ A few things you might want to tweak:
 - **Bot joins but plays silence** — confirm `SIMPLEX_API_KEY` is valid
   (`python bot.py --check`) and that the file is real audio.
 - **`PyNaCl` / voice errors** — `pip install -r requirements.txt` again;
-  PyNaCl is required for voice.
+  the `discord.py[voice]` extra is required for voice.
+- **`RuntimeError: davey library needed in order to use voice`** — you have
+  discord.py 2.6+, which needs the new voice backend. Reinstall with the
+  voice extra: `pip install -U "discord.py[voice]"` (or just rerun
+  `pip install -r requirements.txt`), then restart the bot.
 - **Folder is empty in `/browse`** — make sure the folder ID is correct and
   actually contains audio files (`python bot.py --list-folders`).
